@@ -6,9 +6,11 @@ import logging
 from datetime import datetime
 from collections import deque
 from fall_detection import MotionDetector, FallDetector, AlertManager
+import os
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key-here'
+app.config['SECRET_KEY'] = 'c83e26f8536401cc60668254e2abeb9e45039c26c82e6969525c22ed3c93a73e'
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
