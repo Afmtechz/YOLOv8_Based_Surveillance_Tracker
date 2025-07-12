@@ -1,76 +1,133 @@
-````markdown
-# Real-Time Object Detection System
+Here’s a clean, styled `README.md` file in **Markdown** format for your YOLO Object Detection system with User Authentication:
 
-This project implements a real-time object detection system using the YOLOv8 model and OpenCV.
-It captures live video from a webcam, processes each frame to detect objects
-and displays the results with class labels and confidence scores.
+---
 
-## Features
+```markdown
+<h1 align="center" style="color:#1abc9c;font-family:Verdana;">
+  🔒 YOLO Object Detection with Secure User Authentication
+</h1>
 
-- Real-time video capture and object detection
-- Utilizes YOLOv8 for high-speed and accurate recognition
-- Displays bounding boxes, class names, and confidence levels
-- Custom color assignment for each detected class
+<p align="center" style="font-size:18px;">
+  <strong>AI-powered surveillance system with real-time object detection and user management</strong>
+</p>
 
-## Requirements
+---
 
-- Python 3.8+
-- OpenCV
-- Ultralytics (YOLOv8)
+## 🧠 Features
 
-## Installation
+- ✅ **User Authentication** (Sign up, login, logout, session management)
+- 🔐 **Secure Password Hashing** with Salt using PBKDF2-HMAC-SHA256
+- 🕵️ **YOLOv8 Real-time Object Detection**
+- 🚨 **Person Detection Alert** with Sound Notification (via Pygame)
+- 🧪 **SQLite3 Database** for users and session tracking
+- 🎥 **Live Video Stream** with annotated detections
+- 🧼 **Robust Error Handling** and detailed logging
 
-1. **Clone the Repository**
+---
 
-```bash
-git clone https://github.com/Afmtechz/YOLOv8_Based_Surveillance_Tracker
-cd your-repo-name
-````
+## 🏗️ Project Structure
 
-2. **Create a Virtual Environment (Optional but Recommended)**
-
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows use: venv\Scripts\activate
 ```
 
-3. **Install Dependencies**
+claude\_code.py          # Main application file
+users.db                # SQLite DB (created on first run)
+yolov8s.pt              # YOLOv8 pre-trained weights
+alert.mp3 / alert.wav   # Sound file for person detection
+detection.log           # Logging output
+
+````
+
+---
+
+## 🚀 Getting Started
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/yourusername/yolo-auth-detector.git
+cd yolo-auth-detector
+````
+
+### 2. Install Requirements
 
 ```bash
 pip install -r requirements.txt
 ```
 
-> Note: Ensure you have `torch` and the `ultralytics` package installed.
-> If not, install them via:
+### 3. Run the Application
 
 ```bash
-pip install ultralytics opencv-python
+python claude_code.py
 ```
 
-## Usage
+---
 
-Run the application using:
+## 📦 Requirements
+
+```
+opencv-python
+pygame
+ultralytics
+```
+
+*You can install them via:*
 
 ```bash
-python main.py
+pip install opencv-python pygame ultralytics
 ```
 
-Press `q` to exit the video stream.
+---
 
-## Model
+## 🎮 How it Works
 
-This application uses the YOLOv8s model (`yolov8s.pt`) by default. 
-Make sure the model file is available or install it using the Ultralytics CLI:
+1. **Startup Menu**:
 
-```bash
-yolo task=detect mode=train model=yolov8s.pt
+   * Login
+   * Create Account
+   * Exit
+
+2. **Upon Login**:
+
+   * YOLOv8 model loads
+   * Camera feed starts
+   * Person detection triggers audio alert
+   * User info is displayed on the video
+
+---
+
+## 🛡️ Security Features
+
+* Passwords stored securely with unique salts.
+* Accounts lock after **5 failed attempts** for **30 minutes**.
+* Sessions auto-expire after **2 hours of inactivity**.
+
+---
+
+## 👤 Author
+
+**Sohan**
+🌐 [afmtechz.anvil.app](https://afmtechz.anvil.app)
+
+---
+
+## 📸 Screenshot
+
+![App Preview](preview.png)
+
+---
+
+## 📝 License
+
+This project is for personal or educational use. No license attached.
+
 ```
 
-## Author
+---
 
-**Sohan** • [afmtechz.anvil.app](https://afmtechz.anvil.app)
+Let me know if you'd like:
 
-## Acknowledgements
+- An HTML-styled version for GitHub Pages
+- A version with collapsible sections
+- Additional badges (e.g., Python version, last updated, etc.)
 
-* [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics)
-* [OpenCV](https://opencv.org/)
+Also let me know your GitHub repo name if you want a commit message and `.gitignore` too.
+```
