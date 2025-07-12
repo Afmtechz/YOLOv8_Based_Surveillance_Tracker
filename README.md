@@ -43,7 +43,7 @@ pip install -r requirements.txt
 
 ### 3. Run the Application
 ```bash
-python claude_code.py
+python main.py
 ```
 
 
