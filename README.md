@@ -1,7 +1,9 @@
 ````markdown
 # Real-Time Object Detection System
 
-This project implements a real-time object detection system using the YOLOv8 model and OpenCV. It captures live video from a webcam, processes each frame to detect objects, and displays the results with class labels and confidence scores.
+This project implements a real-time object detection system using the YOLOv8 model and OpenCV.
+It captures live video from a webcam, processes each frame to detect objects
+and displays the results with class labels and confidence scores.
 
 ## Features
 
@@ -38,7 +40,8 @@ source venv/bin/activate  # On Windows use: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-> Note: Ensure you have `torch` and the `ultralytics` package installed. If not, install them via:
+> Note: Ensure you have `torch` and the `ultralytics` package installed.
+> If not, install them via:
 
 ```bash
 pip install ultralytics opencv-python
@@ -56,7 +59,8 @@ Press `q` to exit the video stream.
 
 ## Model
 
-This application uses the YOLOv8s model (`yolov8s.pt`) by default. Make sure the model file is available or install it using the Ultralytics CLI:
+This application uses the YOLOv8s model (`yolov8s.pt`) by default. 
+Make sure the model file is available or install it using the Ultralytics CLI:
 
 ```bash
 yolo task=detect mode=train model=yolov8s.pt
