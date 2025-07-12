@@ -23,7 +23,7 @@ and displays the results with class labels and confidence scores.
 1. **Clone the Repository**
 
 ```bash
-git clone https://github.com/your-username/your-repo-name.git
+git clone https://github.com/Afmtechz/YOLOv8_Based_Surveillance_Tracker
 cd your-repo-name
 ````
 
