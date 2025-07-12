@@ -1,45 +1,72 @@
-# Baby Monitor – Motion & Fall Detection
+````markdown
+# Real-Time Object Detection System
 
-## Setup
+This project implements a real-time object detection system using the YOLOv8 model and OpenCV. It captures live video from a webcam, processes each frame to detect objects, and displays the results with class labels and confidence scores.
 
-Clone: git clone <repo>
-cd baby_monitor
+## Features
+
+- Real-time video capture and object detection
+- Utilizes YOLOv8 for high-speed and accurate recognition
+- Displays bounding boxes, class names, and confidence levels
+- Custom color assignment for each detected class
+
+## Requirements
+
+- Python 3.8+
+- OpenCV
+- Ultralytics (YOLOv8)
+
+## Installation
+
+1. **Clone the Repository**
+
+```bash
+git clone https://github.com/your-username/your-repo-name.git
+cd your-repo-name
+````
+
+2. **Create a Virtual Environment (Optional but Recommended)**
+
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows use: venv\Scripts\activate
+```
+
+3. **Install Dependencies**
+
+```bash
 pip install -r requirements.txt
-## Run locally
+```
 
-python app.py
+> Note: Ensure you have `torch` and the `ultralytics` package installed. If not, install them via:
 
-Navigate to http://localhost:5000
+```bash
+pip install ultralytics opencv-python
+```
 
----
+## Usage
 
-## 🎯 Remote Deployment
+Run the application using:
 
-### Using a Linux VPS (e.g., Ubuntu)
+```bash
+python main.py
+```
 
-git clone project.
-Install packages and system deps:
-sudo apt update sudo apt install python3 python3-venv libglib2.0-0 python3 -m venv venv source venv/bin/activate pip install -r requirements.txt
+Press `q` to exit the video stream.
 
-Expose RTSP camera (if remote).
-Run:
-nohup gunicorn app:app -b 0.0.0.0:5000 --workers 2 &
+## Model
 
-Setup a reverse proxy (Nginx):
-```nginx
-server {
-listen 80;
-server_name your-domain.com;
-location / {
- proxy_pass http://127.0.0.1:5000;
- proxy_http_version 1.1;
- proxy_set_header Upgrade $http_upgrade;
- proxy_set_header Connection keep-alive;
- proxy_set_header Host $host;
- proxy_cache_bypass $http_upgrade;
-}
-}
+This application uses the YOLOv8s model (`yolov8s.pt`) by default. Make sure the model file is available or install it using the Ultralytics CLI:
 
-sudo systemctl restart nginx
+```bash
+yolo task=detect mode=train model=yolov8s.pt
+```
 
-Access via http://your-domain.com
+## License
+
+This project is licensed under the MIT License.
+
+## Acknowledgements
+
+* [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics)
+* [OpenCV](https://opencv.org/)
