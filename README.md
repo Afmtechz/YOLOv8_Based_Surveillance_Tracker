@@ -74,5 +74,3 @@ yolo task=detect mode=train model=yolov8s.pt
 
 * [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics)
 * [OpenCV](https://opencv.org/)
-
-```
