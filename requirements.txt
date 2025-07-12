@@ -1,4 +1,3 @@
-flask
-opencv-python-headless
-mediapipe
-gunicorn
+ultralytics>=8.0.0
+opencv-python>=4.5.0
+torch>=1.10.0
