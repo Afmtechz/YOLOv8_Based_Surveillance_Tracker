@@ -31,7 +31,7 @@ detection.log           # Logging output
 ### 1. Clone the Repository
 ```bash
 git clone https://github.com/Afmtechz/YOLOv8_Based_Surveillance_Tracker.git
-cd yolo-auth-detector
+cd YOLOv8_Based_Surveillance_Tracker
 ```
 
 
