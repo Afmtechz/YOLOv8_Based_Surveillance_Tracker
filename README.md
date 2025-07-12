@@ -1,3 +1,7 @@
+Here's the updated `README.md` with the license section removed and your website added next to the author name:
+
+---
+
 ````markdown
 # Real-Time Object Detection System
 
@@ -62,11 +66,13 @@ This application uses the YOLOv8s model (`yolov8s.pt`) by default. Make sure the
 yolo task=detect mode=train model=yolov8s.pt
 ```
 
-## License
+## Author
 
-This project is licensed under the MIT License.
+**Sohan** • [afmtechz.anvil.app](https://afmtechz.anvil.app)
 
 ## Acknowledgements
 
 * [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics)
 * [OpenCV](https://opencv.org/)
+
+```
