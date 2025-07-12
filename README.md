@@ -1,7 +1,3 @@
-Here's the updated `README.md` with the license section removed and your website added next to the author name:
-
----
-
 ````markdown
 # Real-Time Object Detection System
 
